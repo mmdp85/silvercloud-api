@@ -1,16 +1,10 @@
-// /api/iol.js — Vercel Serverless Proxy for IOL API
-// Credentials are stored in Vercel Environment Variables (never in code)
-
 const IOL_BASE = 'https://api.invertironline.com';
 
-// Token cache (in-memory, per cold start)
 let cachedToken = null;
 let tokenExpiry = 0;
 
 async function getToken() {
   const now = Date.now();
-
-  // Reuse token if still valid (with 60s buffer)
   if (cachedToken && now < tokenExpiry - 60000) {
     return cachedToken;
   }
@@ -19,49 +13,66 @@ async function getToken() {
   const password = process.env.IOL_PASSWORD;
 
   if (!username || !password) {
-    throw new Error('IOL credentials not configured. Set IOL_USERNAME and IOL_PASSWORD in Vercel Environment Variables.');
+    throw new Error('Credentials not configured');
   }
 
-  const resp = await fetch(`${IOL_BASE}/token`, {
+  const resp = await fetch(IOL_BASE + '/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&grant_type=password`
+    body: 'username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password) + '&grant_type=password'
   });
 
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`IOL auth failed (${resp.status}): ${text}`);
+    throw new Error('Auth failed: ' + resp.status);
   }
 
   const data = await resp.json();
   cachedToken = data.access_token;
-  // IOL tokens last ~15 min, we cache for 12 min
   tokenExpiry = now + 12 * 60 * 1000;
-
   return cachedToken;
 }
 
-async function proxyRequest(path, token) {
-  const url = `${IOL_BASE}${path}`;
+module.exports = async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  const resp = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json'
-    }
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    return { status: resp.status, body: { error: `IOL API error (${resp.status})`, detail: text } };
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  const data = await resp.json();
-  return { status: 200, body: data };
-}
+  try {
+    var iolPath = req.url.replace(/^\/api\/iol/, '');
 
-export default async function handler(req, res) {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin',
+    if (!iolPath || iolPath === '/' || iolPath === '/health' || req.url === '/api/health' || req.url === '/api/iol') {
+      return res.status(200).json({
+        status: 'ok',
+        message: 'SilverCloud IOL Proxy',
+        timestamp: new Date().toISOString(),
+        hasCredentials: !!(process.env.IOL_USERNAME && process.env.IOL_PASSWORD)
+      });
+    }
+
+    var token = await getToken();
+
+    var url = IOL_BASE + '/api' + iolPath;
+    var resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!resp.ok) {
+      var errText = await resp.text();
+      return res.status(resp.status).json({ error: 'IOL error ' + resp.status, detail: errText });
+    }
+
+    var data = await resp.json();
+    return res.status(200).json(data);
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
