@@ -1,0 +1,6 @@
+{
+  "name": "silvercloud-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SilverCloud IOL API Proxy"
+}
