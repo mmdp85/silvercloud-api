@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/api/fmp/(.*)", "destination": "/api/fmp.js" },
+    { "source": "/api/fmp", "destination": "/api/fmp.js" },
     { "source": "/api/(.*)", "destination": "/api/iol.js" }
   ],
   "headers": [
